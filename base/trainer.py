@@ -1,5 +1,4 @@
 from tqdm.auto import tqdm
-import torch
 from torch import nn
 from loader.dataloader import load_data
 from loader.criterion_loader import load_criterion
@@ -8,8 +7,9 @@ from loader.optimizer_loader import load_optimizer
 from util.accuracy_torch import get_accuracy
 from util.statistical_results import plot_accuracy,plot_losses
 from util.log import Log 
+from util.evaluation import early_stopping
 import os
-
+import torch
 
 
 class Trainer:
@@ -67,16 +67,27 @@ class Trainer:
         return epoch_loss
     
     def test(self):
-        print("Test set accuracy = ",get_accuracy(self.model,self.test_loader,self.device))
+        test_accuracy = get_accuracy(self.model,self.test_loader,self.device)
+        print("Test set accuracy = ",test_accuracy)
+        self.log.save_testing_performance(
+            {
+                "test_accuracy":[test_accuracy]
+            }
+        )
+        print("Save log successfully")
+       
+        
     
     def save_log(self,train_losses,valid_losses,train_accuracy,val_accuracy):
         self.log.save_training_loss({
             "Epoch":range(self.epochs),
-            "Training loss": train_losses
+            "Training loss": train_losses,
+            "Validation loss":valid_losses
         })
         self.log.save_training_performance({
             "Epoch":range(self.epochs),
-            "Training Accuracy": train_accuracy
+            "Training Accuracy": train_accuracy,
+            "Validation Accuracy": val_accuracy
         })
         print("Save log successfully")
         
@@ -113,6 +124,11 @@ class Trainer:
                 max_val_accuracy = val_acc
                 self.log.save_model(self.model)
                 print("Save best model")
+
+            # early stopping
+            _,should_stop= early_stopping(val_accuracy,stopping_steps=7)
+            if should_stop:
+                break
         
         # save log
         self.save_log(train_losses,valid_losses,train_accuracy,val_accuracy)

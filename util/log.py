@@ -23,4 +23,6 @@ class Log:
         df_train_log = pd.DataFrame(train_log)
         df_train_log.to_csv(os.path.join(self.root,"training_perfomance.csv"))
         
-        
+    def save_testing_performance(self,test_log):
+        df_test_log = pd.DataFrame(test_log)
+        df_test_log.to_csv(os.path.join(self.root,"testing_perfomance.csv"))

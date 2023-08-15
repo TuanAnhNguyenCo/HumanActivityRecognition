@@ -19,7 +19,7 @@ def parse_arguments():
                         help='seed')
     parser.add_argument('--epochs', type=float, default=3,
                         help='seed')
-    parser.add_argument('--train_batch_size', type=float, default=256,
+    parser.add_argument('--train_batch_size', type=float, default=128,
                         help='seed')
     parser.add_argument('--val_batch_size', type=float, default=64,
                         help='seed')
@@ -29,7 +29,7 @@ def parse_arguments():
                         help='seed')
     parser.add_argument('--optimizer', type = str , default="SGD",choices=["Adam"],
                         help='seed')
-    parser.add_argument('--device', type = str , default="cuda:0",choices=["cpu"],
+    parser.add_argument('--device', type = str , default="cuda:1",choices=["cpu"],
                         help='seed')
     parser.add_argument('--n_classes', type = int , default=18,
                         help='seed')
