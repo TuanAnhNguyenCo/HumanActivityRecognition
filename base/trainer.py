@@ -7,18 +7,27 @@ from loader.model_loader import load_model
 from loader.optimizer_loader import load_optimizer
 from util.accuracy_torch import get_accuracy
 from util.statistical_results import plot_accuracy,plot_losses
+from util.log import Log 
+import os
+
+
+
 class Trainer:
     def __init__(self,args):
         self.train_loader, self.valid_loader, self.test_loader = load_data(
             args['root'],args['train_batch_size'],
-            args['val_batch_size'],args['test_batch_size']
+            args['val_batch_size'],args['test_batch_size'],args['input_dim']
         )
         self.device = args['device']
         self.epochs = args['epochs']
         self.model = load_model(args['model'],args['n_classes']).to(self.device)
         self.criterion = load_criterion(args['loss_function'])
         self.optimizer = load_optimizer(args['optimizer'],self.model,args['lrate'])
+        self.output = f"./log/{args['dataset']}/@{args['model']}-inp_emb:{args['input_dim'][0]}x{args['input_dim'][1]}-lr:{args['lrate']}-ep:{args['epochs']}-l:{args['loss_function']}-op:{args['optimizer']}-wdecay:{args['weight_decay']}"
+        self.log = Log(self.output,args['model'])
         
+        if not os.path.exists(self.output):
+            os.makedirs(self.output)
     
         
     def train_each_epoch(self):
@@ -60,11 +69,25 @@ class Trainer:
     def test(self):
         print("Test set accuracy = ",get_accuracy(self.model,self.test_loader,self.device))
     
+    def save_log(self,train_losses,valid_losses,train_accuracy,val_accuracy):
+        self.log.save_training_loss({
+            "Epoch":range(self.epochs),
+            "Training loss": train_losses
+        })
+        self.log.save_training_performance({
+            "Epoch":range(self.epochs),
+            "Training Accuracy": train_accuracy
+        })
+        print("Save log successfully")
+        
+    
     def train(self):
         train_losses = []
         valid_losses = []
         train_accuracy = []
         val_accuracy = []
+        
+        max_val_accuracy = -1
 
         for epoch in range(self.epochs):
             # training
@@ -84,9 +107,21 @@ class Trainer:
             #save accuracy
             train_accuracy.append(train_acc)
             val_accuracy.append(val_acc)
+            
+            # save best model
+            if val_acc > max_val_accuracy:
+                max_val_accuracy = val_acc
+                self.log.save_model(self.model)
+                print("Save best model")
         
+        # save log
+        self.save_log(train_losses,valid_losses,train_accuracy,val_accuracy)
+        
+        # plot results
         plot_losses(train_losses,valid_losses)
         plot_accuracy(train_accuracy,val_accuracy)
+        
+        
         
         
          

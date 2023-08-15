@@ -5,11 +5,7 @@ import os
 import glob
 import numpy as np
 
-# convert to tensor (channel, height, width)
-train_transform = transforms.Compose([
-    transforms.Resize((28,28)),
-    transforms.ToTensor(),  
-])
+
 class HandSignData(Dataset):
     def __init__(self,img_dir,img_labels,transform = None):
         self.img_dir = img_dir
@@ -26,7 +22,7 @@ class HandSignData(Dataset):
         return (img,label)
     
  
-def load_data(ROOT,train_size,valid_size,test_size,n = 5):
+def load_data(ROOT,train_size,valid_size,test_size,input_dim,n = 5):
     folder_name = os.listdir(ROOT)
     labels = {}
     X_train = []
@@ -50,9 +46,18 @@ def load_data(ROOT,train_size,valid_size,test_size,n = 5):
         y_train.extend(np.full(len(file_list[:subset_len*(n-2)]),i))
         y_val.extend(np.full(len(file_list[subset_len*(n-2):subset_len*(n-1)]),i))
         y_test.extend(np.full(len(file_list[subset_len*(n-1):]),i))
-        
+    
+    # convert to tensor (channel, height, width)
+    train_transform = transforms.Compose([
+        transforms.Resize((input_dim[0],input_dim[0])),
+        transforms.ToTensor(),  
+    ])
+    test_transform = transforms.Compose([
+        transforms.Resize((input_dim[0],input_dim[0])),
+        transforms.ToTensor(),  
+    ])
     train_loader = DataLoader(HandSignData(X_train,y_train,train_transform),batch_size = train_size,drop_last = False)
-    valid_loader = DataLoader(HandSignData(X_val,y_val,train_transform),batch_size = valid_size,drop_last = False)
-    test_loader = DataLoader(HandSignData(X_test,y_test,train_transform),batch_size = test_size,drop_last = False)  
+    valid_loader = DataLoader(HandSignData(X_val,y_val,test_transform),batch_size = valid_size,drop_last = False)
+    test_loader = DataLoader(HandSignData(X_test,y_test,test_transform),batch_size = test_size,drop_last = False)  
    
     return train_loader,valid_loader,test_loader

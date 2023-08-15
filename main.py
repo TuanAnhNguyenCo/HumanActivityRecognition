@@ -17,7 +17,7 @@ def parse_arguments():
                         help='Dataset name')
     parser.add_argument('--lrate', type=float, default=0.01,
                         help='seed')
-    parser.add_argument('--epochs', type=float, default=50,
+    parser.add_argument('--epochs', type=float, default=3,
                         help='seed')
     parser.add_argument('--train_batch_size', type=float, default=256,
                         help='seed')
@@ -33,7 +33,11 @@ def parse_arguments():
                         help='seed')
     parser.add_argument('--n_classes', type = int , default=18,
                         help='seed')
-    parser.add_argument('--root', type = str , default="./data/image",
+    parser.add_argument('--root', type = str , default="./data/image/subsampleHAR",
+                        help='seed')
+    parser.add_argument('--input_dim', type = list , default=[28,28],
+                        help='seed')
+    parser.add_argument('--weight_decay', type = int , default=0,
                         help='seed')
     return parser.parse_args()
 
