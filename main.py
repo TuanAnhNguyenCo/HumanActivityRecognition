@@ -29,7 +29,7 @@ def parse_arguments():
                         help='seed')
     parser.add_argument('--optimizer', type = str , default="SGD",choices=["Adam"],
                         help='seed')
-    parser.add_argument('--device', type = str , default="cuda:1",choices=["cpu"],
+    parser.add_argument('--device', type = str , default="cuda:0",choices=["cpu"],
                         help='seed')
     parser.add_argument('--n_classes', type = int , default=18,
                         help='seed')
@@ -37,39 +37,16 @@ def parse_arguments():
                         help='seed')
     return parser.parse_args()
 
-def ModelLoader(model_name , args):
-    model = None
-    train_loader,valid_loader,test_loader = None,None,None
-    criterion = None
-    optimizer = None
-
-    if args['dataset'] == "SubsampleHAR":
-        print("Start reading")
-        train_loader,valid_loader,test_loader = load_data(
-            args['root'],args['train_batch_size'],args['val_batch_size'],args['test_batch_size']
-        )
-        print("Read data successfully")
-        
-    if args["loss_function"] == 'CrossEntropyLoss':
-        criterion = nn.CrossEntropyLoss()
-        
-    if model_name =='CNN':
-        har_model = HandSignCNNModel(args['n_classes'])
-        
-    if args['optimizer'] == "SGD":
-        optimizer = torch.optim.SGD(har_model.parameters(),lr = args['lrate'],momentum = 0.9)
-   
+def ModelLoader(args):
     
-    model = Trainer(train_loader,valid_loader,test_loader,har_model,
-                    criterion,optimizer,args['device'],args['epochs'])
+    model = Trainer(args)
         
     return model 
 
 def main():
     args = parse_arguments()
     args = namespace_to_dict(args)
-    model_name = args['model']
-    model = ModelLoader(model_name, args)
+    model = ModelLoader(args)
     model.train()
     model.test()
     

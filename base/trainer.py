@@ -1,20 +1,24 @@
 from tqdm.auto import tqdm
 import torch
+from torch import nn
+from loader.dataloader import load_data
+from loader.criterion_loader import load_criterion
+from loader.model_loader import load_model
+from loader.optimizer_loader import load_optimizer
 from util.accuracy_torch import get_accuracy
 from util.statistical_results import plot_accuracy,plot_losses
-
 class Trainer:
-    def __init__(self,train_loader,valid_loader,test_loader,
-                 model,criterion,optimizer,device,epochs         
-                 ):
-        self.train_loader = train_loader
-        self.valid_loader = valid_loader
-        self.test_loader = test_loader
-        self.model = model.to(device)
-        self.criterion = criterion
-        self.optimizer = optimizer
-        self.device = device
-        self.epochs = epochs
+    def __init__(self,args):
+        self.train_loader, self.valid_loader, self.test_loader = load_data(
+            args['root'],args['train_batch_size'],
+            args['val_batch_size'],args['test_batch_size']
+        )
+        self.device = args['device']
+        self.epochs = args['epochs']
+        self.model = load_model(args['model'],args['n_classes']).to(self.device)
+        self.criterion = load_criterion(args['loss_function'])
+        self.optimizer = load_optimizer(args['optimizer'],self.model,args['lrate'])
+        
     
         
     def train_each_epoch(self):
