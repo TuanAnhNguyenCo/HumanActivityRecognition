@@ -5,6 +5,9 @@ from model.HandSignCNNModel import HandSignCNNModel
 from base.trainer import Trainer
 from torch import nn
 import torch
+import numpy as np
+from util.img2bone import HandDetector
+import torch.nn.functional as F
 
 def parse_arguments():
     # Create the parser
@@ -56,5 +59,16 @@ def main():
     
 if __name__ == "__main__":
     print("Run")
-    main()
+    # main()
+    # handDetector = HandDetector()
+    # handDetector.findHands("data/image/subsampleHAR/dislike/001c6f56-85cf-4e45-bfc1-1af53c0e501b.jpg")
+    terminal = nn.Parameter(torch.randn(5, 1, 13))
+    head_la = F.interpolate(torch.stack([terminal[0],terminal[1]],2), 6)
+    head_ra = F.interpolate(torch.stack([terminal[0],terminal[2]],2), 6)
+    lw_ra = F.interpolate(torch.stack([terminal[3],terminal[4]],2), 6)
+    node_features = torch.cat([
+								   (head_la[:,:,:3] + head_ra[:,:,:3])/2,
+								   torch.stack((lw_ra[:,:,2], lw_ra[:,:,1], lw_ra[:,:,0]), 2),
+								   lw_ra[:,:,3:], head_la[:,:,3:], head_ra[:,:,3:]], 2)
+    print(node_features.shape)
     print("End")
