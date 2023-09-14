@@ -2,3 +2,10 @@ torchvision
 matplotlib
 numpy
 mediapipe
+pandas
+scikit-learn
+matplotlib
+numpy
+torch
+tqdm
+seaborn

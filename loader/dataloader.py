@@ -4,6 +4,7 @@ from PIL import Image
 import os
 import glob
 import numpy as np
+import torch
 
 
 class HandSignData(Dataset):
@@ -20,6 +21,46 @@ class HandSignData(Dataset):
             img = self.transform(img)
         img = img/255 # scale image
         return (img,label)
+
+class SkeletonData(Dataset):
+    def __init__(self,url):
+        self.features,self.labels = load_data_from_file(url)
+        print("features = ",len(self.features)," class = ",len(self.labels))
+    def __len__(self):
+        return len(self.labels)
+    def __getitem__(self, idx):
+        feature = self.features[idx]
+        feature = torch.tensor(feature).reshape(-1,3)
+        label = self.labels[idx]
+        return (feature,label)
+
+def load_data_from_file(url,is_class = False):
+    if not is_class:
+        data = []
+        labels = []
+        with open(url,'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                line = [float(i) for i in line.replace("\n","").split(',')]
+                data.append(line[2:])
+                labels.append(int(line[1]))
+        return data,labels
+    else:
+        data = {}
+        with open(url,'r') as f:
+            lines = f.readlines()
+            for line in lines:
+                line = line.replace("\n","").split(':')
+                data[int(line[1])] = line[0]
+        return data
+
+
+def load_data_HaGRID(ROOT,n = 5):
+   pass
+        
+
+
+    
     
  
 def load_data(ROOT,train_size,valid_size,test_size,input_dim,n = 5):
