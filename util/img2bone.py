@@ -27,9 +27,9 @@ class HandDetector:
         self.fingers = []
         self.lmList = []
 
-    def findHands(self, img, n_classes, data_type):
+    def findHands(self, img):
         """
-        data_type: 0: train - 1: valid - 2: test
+        class video_idx frame_idx and one video has 64 frames
         """
         # img = cv2.imread(img_url)
         img_bone = np.ones((img.shape[0], img.shape[1], 3)) * 255
@@ -43,11 +43,9 @@ class HandDetector:
                 myHand = {}
                 # lmList
                 mylmList = []
-
-                mylmList.extend([data_type, n_classes])
                 for id, lm in enumerate(handLms.landmark):
                     # mylmList.extend([lm.x, lm.y, lm.z])
-                    mylmList.extend([lm.x, lm.y, lm.z])
+                    mylmList.append([lm.x, lm.y, lm.z])
             return mylmList
 
         return None

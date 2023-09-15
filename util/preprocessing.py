@@ -3,55 +3,55 @@ from .img2bone import HandDetector
 import os
 import numpy as np
 import cv2
+import torch
 
 
-def img2bone(train_url, test_url, file_url, valid_size=0.3):
+def img2bone(url,  train_size=0.6, test_size=0.2, val_size=0.2):
     classes = {}
-    train_folders = glob.glob(train_url+"/*")
-    test_folders = glob.glob(test_url+"/*")
-    cnt = 0
-    train_joint_nodes = []
-    val_joint_nodes = []
-    test_joint_nodes = []
+    folders = glob.glob(os.path.join(url, "*"))
+    train = []
+    train_label = []
+    test = []
+    test_label = []
+    val = []
+    val_label = []
+    classes = read_class_from_file()
+
     handDetector = HandDetector()
-    for folder_name in train_folders:
-        class_name = folder_name[folder_name.index("hand_")+5:]
-        if classes.get(class_name) == None:
-            cnt += 1
-            classes[class_name] = cnt - 1
-        image_urls = glob.glob(folder_name+"/*")
-        train_idx = int(len(image_urls)*(1-valid_size))
-        training_image_urls = image_urls[:train_idx]
-        validation_image_urls = image_urls[train_idx:]
-        for url in training_image_urls:
-            train_joint_nodes = handDetector.findHands(
-                url, classes[class_name], 0)
-            if train_joint_nodes != None:
-                write_to_file(file_url, "train.txt", train_joint_nodes)
+    for folder in folders:
+        class_name = folder[folder.index("Class ")+6:]
+        print("Class name", class_name)
+        videos = glob.glob(folder+"/*")
+        train_vid = videos[:int(len(videos) * train_size)]
+        test_vid = videos[int(len(videos) * train_size)
+                              :int(len(videos) * (train_size + test_size))]
+        val_vid = videos[int(len(videos) * (train_size+test_size)):]
+        for video in train_vid:
+            frames, bones = readVideoAndCovertToBone(video)
+            if bones is not None:
+                train.append(bones)
+                train_label.append(classes[class_name])
 
-        for url in validation_image_urls:
-            val_joint_nodes = handDetector.findHands(
-                url, classes[class_name], 1)
-            if val_joint_nodes != None:
-                write_to_file(file_url, "validation.txt", val_joint_nodes)
+        for video in test_vid:
+            frames, bones = readVideoAndCovertToBone(video)
+            if bones is not None:
+                test.append(bones)
+                test_label.append(classes[class_name])
 
-        print("Finish train folder = ", class_name)
+        for video in val_vid:
+            frames, bones = readVideoAndCovertToBone(video)
+            if bones is not None:
+                val.append(bones)
+                val_label.append(classes[class_name])
 
-    for folder_name in test_folders:
-        class_name = folder_name[folder_name.index("hand_")+5:]
-        if classes.get(class_name) == None:
-            cnt += 1
-            classes[class_name] = cnt - 1
-        image_urls = glob.glob(folder_name+"/*")
+        print("Done", class_name)
 
-        for url in image_urls:
-            test_joint_nodes = handDetector.findHands(
-                url, classes[class_name], 2)
-            if test_joint_nodes != None:
-                write_to_file(file_url, "test.txt", test_joint_nodes)
-        print("Finish test folder = ", class_name)
-
-    write_classes_to_file(file_url, "classes.txt", classes)
+    torch.save((torch.tensor(train), torch.tensor(
+        train_label)), '../data/108_new/train.pkl')
+    torch.save((torch.tensor(test), torch.tensor(
+        test_label)), '../data/108_new/test.pkl')
+    torch.save((torch.tensor(val), torch.tensor(val_label)),
+               '../data/108_new/val.pkl')
 
 
 def img2BoneWithHaGRID(ROOT, file_save_path, n=5):
@@ -108,6 +108,7 @@ def readVideoAndCovertToBone(url):
     bones = []
     cap.set(cv2.CAP_PROP_POS_FRAMES, 100)
     if not cap.isOpened():
+        print("Can capture video", url)
         return None, None
     n_frame = 64
 
@@ -117,7 +118,7 @@ def readVideoAndCovertToBone(url):
         if not ret:
             break
 
-        bone = handDetector.findHands(frame, 1, 1)
+        bone = handDetector.findHands(frame)
         if bone is None:
             continue
 
@@ -137,7 +138,28 @@ def write_to_file(file_url, file_name, line):
         f.write(f"{line}\n")
 
 
-def write_classes_to_file(file_url, file_name, data):
-    with open(file_url+"/"+file_name, 'w+') as f:
+def write_classes_to_file():
+    class_name = []
+    data = {}
+    with open("../data/108_new/alphabet.txt", 'r') as f:
+        class_name = f.readlines()
+    for idx, name in enumerate(class_name):
+        name = name.replace("\n", "")
+        data[name] = idx
+    with open("data/108_new/class.txt", 'w') as f:
         for key, value in data.items():
             f.write('%s:%s\n' % (key, value))
+
+
+def read_class_from_file():
+    data = {}
+    with open("../data/108_new/class.txt", 'r') as f:
+        lines = f.readlines()
+    for line in lines:
+        line = line.replace("\n", "").split(":")
+        data[line[0]] = int(line[1])
+
+    return data
+
+
+img2bone("../data/108_new/new_video")
