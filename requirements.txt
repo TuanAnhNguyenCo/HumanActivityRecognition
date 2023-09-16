@@ -9,3 +9,5 @@ numpy
 torch
 tqdm
 seaborn
+PyWavelets
+einops
