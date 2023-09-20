@@ -9,7 +9,7 @@ from datetime import timedelta
 import random
 
 
-def img2bone(url,  train_size=0.6, test_size=0.2, val_size=0.2):
+def img2bone(url,  trainset=[1, 2, 3, 4, 5], testset=[7], valset=[6]):
     classes = {}
     folders = glob.glob(os.path.join(url, "*"))
     train = []
@@ -22,68 +22,89 @@ def img2bone(url,  train_size=0.6, test_size=0.2, val_size=0.2):
     val_label = []
     val_emg = []
     classes = read_class_from_file()
+    train_cnt = 0
+    test_cnt = 0
+    val_cnt = 0
 
     handDetector = HandDetector()
-    for folder in folders:
-        class_name = folder[folder.index("Class ")+6:]
-        print("Class name", class_name)
-        videos = glob.glob(folder+"/*")
-        random.shuffle(videos)
-        train_vid = videos[:int(len(videos) * train_size)]
-        test_vid = videos[int(len(videos) * train_size)
-                              :int(len(videos) * (train_size + test_size))]
-        val_vid = videos[int(len(videos) * (train_size+test_size)):]
+    for type_url in folders:
+        type_name = type_url[type_url.rfind('/')+1:]
+        days = glob.glob(os.path.join(type_url, "*"))
+        for day in days:
+            d = day[day.rfind('/')+1:]
+            persons = glob.glob(os.path.join(day, "*"))
 
-        for video in train_vid:
-            frames, bones = readVideoAndCovertToBone(video)
-            if bones is not None:
-                user_id = video[video.rfind("_")+1:video.rfind(".")]
-                emg = merge_EMG_CSV_file(
-                    "../data/108_new/EMG", class_name, user_id)
-                if emg is None:
-                    print("class - ", class_name, " user ", user_id)
-                    continue
-                train.append(bones)
-                train_label.append(classes[class_name])
-                train_emg.append(emg)
+            for person in persons:
+                p_id = person[person.rfind('/')+1:]
+                print(type_name, d, p_id)
+                # read class folders
+                folders = glob.glob(os.path.join(person, "*"))
+                # divide user into sets
+                if int(p_id) in trainset:
+                    for folder in folders:
+                        class_name = folder[folder.index("Class ")+6:]
+                        videos = glob.glob(folder+"/*")
+                        emg = merge_EMG_CSV_file(
+                            f"../data/new_data/EMG/{type_name}/CSV/{d}/{p_id}/Class {class_name}", class_name)
+                        if emg is None:
+                            print("class - ", class_name,
+                                  " user ", p_id)
+                            continue
+                        for video in videos:
+                            frames, bones = readVideoAndCovertToBone(video)
+                            if bones is not None:
+                                # train.append(bones)
+                                # train_label.append(classes[class_name])
+                                # train_emg.append(emg)
+                                torch.save((torch.tensor(bones), torch.tensor(
+                                    classes[class_name]), torch.tensor(emg)
+                                ), f'../data/new_data/train/{type_name}_{d}_{p_id}_{class_name}_{train_cnt}.pkl')
+                                train_cnt += 1
+                        print("Train Done person ", p_id,
+                              " class ", class_name)
+                if int(p_id) in testset:
+                    for folder in folders:
+                        class_name = folder[folder.index("Class ")+6:]
+                        videos = glob.glob(folder+"/*")
+                        emg = merge_EMG_CSV_file(
+                            f"../data/new_data/EMG/{type_name}/CSV/{d}/{p_id}/Class {class_name}", class_name)
+                        if emg is None:
+                            print("class - ", class_name,
+                                  " user ", p_id)
+                            continue
+                        for video in videos:
+                            frames, bones = readVideoAndCovertToBone(video)
+                            if bones is not None:
+                                # test.append(bones)
+                                # test_label.append(classes[class_name])
+                                # test_emg.append(emg)
+                                torch.save((torch.tensor(bones), torch.tensor(
+                                    classes[class_name]), torch.tensor(emg)
+                                ), f'../data/new_data/test/{type_name}_{d}_{p_id}_{class_name}_{test_cnt}.pkl')
+                                test_cnt += 1
+                        print("Test Done person ", p_id, " class ", class_name)
 
-        for video in test_vid:
-            frames, bones = readVideoAndCovertToBone(video)
-            if bones is not None:
-                user_id = video[video.rfind("_")+1:video.rfind(".")]
-                emg = merge_EMG_CSV_file(
-                    "../data/108_new/EMG", class_name, user_id)
-                if emg is None:
-                    print("class - ", class_name, " user ", user_id)
-                    continue
-                test_emg.append(emg)
-                test.append(bones)
-                test_label.append(classes[class_name])
-
-        for video in val_vid:
-            frames, bones = readVideoAndCovertToBone(video)
-            if bones is not None:
-                user_id = video[video.rfind("_")+1:video.rfind(".")]
-                emg = merge_EMG_CSV_file(
-                    "../data/108_new/EMG", class_name, user_id)
-                if emg is None:
-                    print("class - ", class_name, " user ", user_id)
-                    continue
-                val_emg.append(emg)
-                val.append(bones)
-                val_label.append(classes[class_name])
-
-        print("Done", class_name)
-    train_emg = np.array(train_emg)
-    val_emg = np.array(val_emg)
-    test_emg = np.array(test_emg)
-
-    torch.save((torch.tensor(train), torch.tensor(train_label),
-               torch.tensor(train_emg)), '../data/108_new/train.pkl')
-    torch.save((torch.tensor(test), torch.tensor(
-        test_label), torch.tensor(test_emg)), '../data/108_new/test.pkl')
-    torch.save((torch.tensor(val), torch.tensor(val_label), torch.tensor(val_emg)),
-               '../data/108_new/val.pkl')
+                if int(p_id) in valset:
+                    for folder in folders:
+                        class_name = folder[folder.index("Class ")+6:]
+                        videos = glob.glob(folder+"/*")
+                        emg = merge_EMG_CSV_file(
+                            f"../data/new_data/EMG/{type_name}/CSV/{d}/{p_id}/Class {class_name}", class_name)
+                        if emg is None:
+                            print("class - ", class_name,
+                                  " user ", p_id)
+                            continue
+                        for video in videos:
+                            frames, bones = readVideoAndCovertToBone(video)
+                            if bones is not None:
+                                # val.append(bones)
+                                # val_label.append(classes[class_name])
+                                # val_emg.append(emg)
+                                torch.save((torch.tensor(bones), torch.tensor(
+                                    classes[class_name]), torch.tensor(emg)
+                                ), f'../data/new_data/val/{type_name}_{d}_{p_id}_{class_name}_{val_cnt}.pkl')
+                                val_cnt += 1
+                        print("Val Done person ", p_id, " class ", class_name)
 
 
 def readVideoAndCovertToBone(url):
@@ -108,7 +129,10 @@ def readVideoAndCovertToBone(url):
 
         bone = handDetector.findHands(frame)
         if bone is None:
-            bone = bones[-1]
+            try:
+                bone = bones[-1]
+            except:
+                return None, None
 
         bones.append(bone)
         frames.append(frame)
@@ -129,19 +153,19 @@ def write_to_file(file_url, file_name, line):
 def write_classes_to_file():
     class_name = []
     data = {}
-    with open("../data/108_new/alphabet.txt", 'r') as f:
+    with open("../data/new_data/alphabet.txt", 'r') as f:
         class_name = f.readlines()
     for idx, name in enumerate(class_name):
         name = name.replace("\n", "")
         data[name] = idx
-    with open("data/108_new/class.txt", 'w') as f:
+    with open("../data/new_data/class.txt", 'w') as f:
         for key, value in data.items():
             f.write('%s:%s\n' % (key, value))
 
 
 def read_class_from_file():
     data = {}
-    with open("../data/108_new/class.txt", 'r') as f:
+    with open("../data/new_data/class.txt", 'r') as f:
         lines = f.readlines()
     for line in lines:
         line = line.replace("\n", "").split(":")
@@ -155,25 +179,29 @@ def extract_frame(text, key):
     return int(text[idx+len(key)])
 
 
-def merge_EMG_CSV_file(url, class_name, user_id):  # test and val are 2s
-    classes = read_class_from_file()
+def merge_EMG_CSV_file(url, class_name):  # test and val are 2s
     data = []
     cnt = 0
     f = 44100
-
-    file_list = glob.glob(url + f"/{class_name}_*{user_id}.csv")
+    file_list = glob.glob(url + "/*")
     if file_list != []:
-        col = pd.DataFrame()
-        sorted_files = sorted(
-            file_list, key=lambda x: extract_frame(x, class_name+"_"))
-        for file in sorted_files:
-            emg_data = pd.read_csv(file)
-            col = pd.concat([col, emg_data], axis=1, ignore_index=True)
+        try:
+            col = pd.DataFrame()
+            sorted_files = sorted(
+                file_list, key=lambda x: extract_frame(x, class_name+"_"))
 
-        col = col.iloc[:f*3, :]
-        return col.to_numpy()
+            for file in sorted_files:
+                emg_data = pd.read_csv(file)
+                col = pd.concat([col, emg_data], axis=1, ignore_index=True)
+
+            col = col.iloc[:f*3, :]
+
+            return col.to_numpy()
+        except pd.errors.EmptyDataError:
+            print(url, " is EmptyColumn")
+            return None
 
     return None
 
 
-img2bone("../data/108_new/new_video")
+img2bone("../data/new_data/VIDEO")
