@@ -1,0 +1,9 @@
+*.jpg
+*.png
+*.zip
+*.pyc
+__pycache__/
+/data
+*.pth
+/log
+/wandb

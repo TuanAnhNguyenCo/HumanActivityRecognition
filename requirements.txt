@@ -1,0 +1,17 @@
+torchvision
+matplotlib
+numpy
+mediapipe
+pandas
+scikit-learn
+matplotlib
+numpy
+torch
+tqdm
+seaborn
+PyWavelets
+einops
+ssqueezepy
+scikit-image
+nltk
+wandb
