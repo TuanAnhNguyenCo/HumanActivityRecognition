@@ -89,7 +89,7 @@ import math
 
 
 # 1-5 train 6 val 7 test
-def img2bone(url, t=['PhongXanh'], time=['20230702'], trainset=[7], testset=[], valset=[]):
+def img2bone(url, t=['PhongXanh'], time=['20230702'], trainset=[1,2,3,4,5,6,7], testset=[], valset=[]):
     classes = {}
     folders = glob.glob(os.path.join(url, "*"))
     train = []
@@ -123,6 +123,7 @@ def img2bone(url, t=['PhongXanh'], time=['20230702'], trainset=[7], testset=[], 
                 # read class folders
                 folders = glob.glob(os.path.join(person, "*"))
                 # divide user into sets
+                print(p_id)
                 if int(p_id) in trainset:
                     for folder in folders:
                         class_name = folder[folder.index("Class ")+6:]
@@ -137,74 +138,69 @@ def img2bone(url, t=['PhongXanh'], time=['20230702'], trainset=[7], testset=[], 
                             continue
                         else:
 
-                            for idx, video in enumerate(videos):
-                                readVideoAndCovertToBone(
-                                    video, type_name, d, p_id, class_name, idx)
+                            # for idx, video in enumerate(videos):
+                            #     readVideoAndCovertToBone(
+                            #         video, type_name, d, p_id, class_name, idx)
 
+                           
+
+                            f = 44100
+                            window = int(f*0.2)
+                            length = int(emg.shape[0]//window)
+                            for i in range(length):
+                                e = emg[i*window:(i+1)*window, :]
+
+                               
+                                
+                                torch.save((e,classes[class_name]), f"../data/new_data/emg_data/{type_name}_{d}_{p_id}_{class_name}_{i}.pkl")
                             print("Done class = ", class_name)
+
+                # if int(p_id) in testset:
+                #     for folder in folders:
+                #         class_name = folder[folder.index("Class ")+6:]
+                #         videos = glob.glob(folder+"/*")
+                #         emg = merge_EMG_CSV_file(
+                #             f"../data/new_data/EMG/{type_name}/CSV/{d}/{p_id}/Class {class_name}", class_name)
+                #         if emg is None:
+                #             print("class - ", class_name,
+                #                   " user ", p_id)
+                #             continue
+                #         else:
 
                             # f = 44100
                             # window = int(f*0.2)
-                            # strideWindow = int(f*0.2)
-                            # # length = int(emg.shape[0]//window)
-                            # length = math.floor(
-                            #     (emg.shape[0]-window)/strideWindow)
-
-                            # emg = torch.tensor((emg - np.min(emg, axis=0)) /
-                            #                    (np.max(emg, axis=0) - np.min(emg, axis=0)))
-                            # print("class name", class_name, " length ", length)
+                            # length = int(emg.shape[0]//window)
                             # for i in range(length):
-                            #     e = emg[strideWindow *
-                            #             i:strideWindow*i+window, :]
-                            #     torch.save((e, torch.tensor(classes[class_name])),
-                            #                f"../data/new_data/vid_data/{type_name}_{d}_{p_id}_{class_name}_{i}.pkl")
+                            #     e = emg[i*window:(i+1)*window, :]
 
-                if int(p_id) in testset:
-                    for folder in folders:
-                        class_name = folder[folder.index("Class ")+6:]
-                        videos = glob.glob(folder+"/*")
-                        emg = merge_EMG_CSV_file(
-                            f"../data/new_data/EMG/{type_name}/CSV/{d}/{p_id}/Class {class_name}", class_name)
-                        if emg is None:
-                            print("class - ", class_name,
-                                  " user ", p_id)
-                            continue
-                        else:
+                            #     e1 = torch.tensor((e - np.min(e, axis=0)) /
+                            #                       (np.max(e, axis=0) - np.min(e, axis=0)))
 
-                            f = 44100
-                            window = int(f*0.2)
-                            length = int(emg.shape[0]//window)
-                            for i in range(length):
-                                e = emg[i*window:(i+1)*window, :]
+                            #     torch.save((torch.tensor(
+                            #         e), e1, classes[class_name]), f"../data/new_data/test2/{type_name}_{d}_{p_id}_{class_name}_{i}.pkl")
 
-                                e1 = torch.tensor((e - np.min(e, axis=0)) /
-                                                  (np.max(e, axis=0) - np.min(e, axis=0)))
+                # if int(p_id) in valset:
+                #     for folder in folders:
+                #         class_name = folder[folder.index("Class ")+6:]
+                #         videos = glob.glob(folder+"/*")
+                #         emg = merge_EMG_CSV_file(
+                #             f"../data/new_data/EMG/{type_name}/CSV/{d}/{p_id}/Class {class_name}", class_name)
+                #         if emg is None:
+                #             print("class - ", class_name,
+                #                   " user ", p_id)
+                #             continue
+                #         else:
 
-                                torch.save((torch.tensor(
-                                    e), e1, classes[class_name]), f"../data/new_data/test2/{type_name}_{d}_{p_id}_{class_name}_{i}.pkl")
+                #             f = 44100
+                #             window = int(f*0.2)
+                #             length = int(emg.shape[0]//window)
+                #             for i in range(length):
+                #                 e = emg[i*window:(i+1)*window, :]
 
-                if int(p_id) in valset:
-                    for folder in folders:
-                        class_name = folder[folder.index("Class ")+6:]
-                        videos = glob.glob(folder+"/*")
-                        emg = merge_EMG_CSV_file(
-                            f"../data/new_data/EMG/{type_name}/CSV/{d}/{p_id}/Class {class_name}", class_name)
-                        if emg is None:
-                            print("class - ", class_name,
-                                  " user ", p_id)
-                            continue
-                        else:
-
-                            f = 44100
-                            window = int(f*0.2)
-                            length = int(emg.shape[0]//window)
-                            for i in range(length):
-                                e = emg[i*window:(i+1)*window, :]
-
-                                e1 = torch.tensor((e - np.min(e, axis=0)) /
-                                                  (np.max(e, axis=0) - np.min(e, axis=0)))
-                                torch.save((torch.tensor(
-                                    e), e1, classes[class_name]), f"../data/new_data/val2/{type_name}_{d}_{p_id}_{class_name}_{i}.pkl")
+                #                 e1 = torch.tensor((e - np.min(e, axis=0)) /
+                #                                   (np.max(e, axis=0) - np.min(e, axis=0)))
+                #                 torch.save((torch.tensor(
+                #                     e), e1, classes[class_name]), f"../data/new_data/val2/{type_name}_{d}_{p_id}_{class_name}_{i}.pkl")
 
 
 def readVideoAndCovertToBone(url, type_name, d, p_id, class_name, idx):
@@ -345,4 +341,4 @@ def merge_EMG_CSV_file(url, class_name):  # test and val are 2s
     return None
 
 
-# img2bone("../data/new_data/VIDEO")
+img2bone("../data/new_data/VIDEO")

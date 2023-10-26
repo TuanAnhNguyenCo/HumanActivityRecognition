@@ -30,9 +30,9 @@ run = wandb.init(
         'random_seed': 20,
         "common_dim": 64,
         "n_classes": 41,
-        "batch_size": 64,
+        "batch_size": 128,
         "T": 1,
-        "device":'cuda:1'
+        "device":'cuda:0'
     })
 
 
@@ -42,7 +42,7 @@ class MultiModal(nn.Module):
         self.gcn = GGCN(find_adjacency_matrix(), 41,
                         [3, 9], [9, 16, 32, 64], run.config["device"], 0.0)
         self.vit = ViT(emg_size=(44100*0.2, 8), patch_height=60, num_classes=41, dim=128,
-                       depth=5, mlp_dim=256, heads=8, pool='cls', dropout=0.45, emb_dropout=0.45).double()
+                       depth=5, mlp_dim=256, heads=8, pool='cls', dropout=0.35, emb_dropout=0.35).double()
         self.crossAtt1 = CrossAttention(63, 14112, 512).double()
         self.crossAtt2 = CrossAttention(14112, 63, 512).double()
         self.vitForEMGandBone = ViTForEMGAndBone(
@@ -134,7 +134,7 @@ def super_gmc_loss(criterion,prediction, target, batch_representations, temperat
             # print(torch.mean(loss_joint_mod).item())
 
         supervised_loss = criterion(prediction[0], target) + criterion(prediction[1], target) + criterion(prediction[2], target)
-        joint_mod_loss_sum *= 0.5
+        joint_mod_loss_sum *= 0.1
         
         
         
@@ -317,7 +317,7 @@ best_f1 = -1000
 T = run.config['T']
 
 
-log = Log("log/Missing_modal2", "multimodal")
+log = Log("log/Missing_modal", "multimodal")
 
 
 for epoch in range(epochs):
@@ -378,7 +378,7 @@ for epoch in range(epochs):
     # save f1 score
     if best_f1 < f1_score_micro:
         torch.save(model.state_dict(),
-                   f"log/Missing_modal2/best_model{epoch}.pth")
+                   f"log/Missing_modal/best_model{epoch}.pth")
         best_f1 = f1_score_micro
 
      # get the bone accuracy

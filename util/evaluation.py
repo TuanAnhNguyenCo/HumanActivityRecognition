@@ -1,6 +1,7 @@
 
-def early_stopping(val_accuracy_list,stopping_steps = 7):
-    best_accuracy = max(val_accuracy_list)
+# loss
+def early_stopping(val_accuracy_list,stopping_steps = 20):
+    best_accuracy = min(val_accuracy_list)
     best_index = val_accuracy_list.index(best_accuracy)
     should_stop = False
     

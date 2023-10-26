@@ -5,7 +5,7 @@ from einops import rearrange, repeat
 from trainer import train,validate,get_accuracy
 from torch.utils.data import Dataset, DataLoader
 from util.log import Log
-from loader.dataloader import SkeletonAndEMGData
+from loader.dataloader import SkeletonAndEMGData1
 import glob
 import numpy as np
 import random
@@ -162,17 +162,22 @@ class Demo(nn.Module):
         self.position_encoding = AbsolutePositionalEncoder(64,64)
         self.encoder = TransformerEncoderBlock()
         self.LSTM = nn.LSTM(64,64,1,True,True)
-        self.downsample = nn.AdaptiveAvgPool1d(512)
+        self.downsample = nn.Sequential(
+            nn.Conv1d(8, 8, kernel_size=45, stride=33, groups=8),
+            # nn.BatchNorm1d(8),
+            # nn.GELU()
+        )
         self.ll = nn.Linear(8,64)
         self.classify = nn.Linear(64,41)
         self.device = device
-        self.ll1 = nn.Linear(8820,1024)
+        self.ll1 = nn.Linear(1024,512)
         self.act = nn.Sigmoid()
         self.act1 = nn.LeakyReLU()
-        self.ll2 = nn.Linear(1024,2048)
-        self.ll3 = nn.Linear(2048,1024)
+        self.ll2 = nn.Linear(512,2048)
+        self.ll3 = nn.Linear(2048,512)
         
     def forward(self,x):
+        x = nn.AdaptiveAvgPool1d(1024)(x)
         x1 = self.ll1(x)
         x2 = self.act(self.ll3(self.act1(self.ll2(x1))))
         x = x1*x2
@@ -186,11 +191,21 @@ class Demo(nn.Module):
         x,_ = self.LSTM(x)
         
         ll = self.ll(old)
-        x = torch.sum(x,dim = 1).squeeze() + torch.sum(ll,dim = 1) + torch.rand((ll.shape[0],ll.shape[-1])).to(self.device)
+        x = torch.sum(x,dim = 1).squeeze()
         return self.classify(x)
         
         
-device = 'cuda:0'
+device = 'cuda:1'
+def seed_everything(seed):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = True
+
+
 def seed_everything(seed):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
@@ -204,31 +219,30 @@ def seed_everything(seed):
 seed_everything(20)
 
 data = []
-data.extend(glob.glob('data/new_data/val2/*'))
-data.extend(glob.glob('data/new_data/train2/*'))
-data.extend(glob.glob('data/new_data/test2/*'))
+data.extend(glob.glob('data/new_data/emg_data/*'))
 
 
 index = np.random.permutation(len(data))
 data = np.array(data)[index]
 train_size = 12000
-test_size = 3500
+test_size = 4500
 val_size = data.shape[0]-train_size - test_size
 trainset = data[:train_size]
 testset = data[train_size:train_size+test_size]
 valset = data[train_size+test_size:]
 
-train_set = SkeletonAndEMGData(trainset)
-test_set = SkeletonAndEMGData(testset)
-val_set = SkeletonAndEMGData(valset)
+train_set = SkeletonAndEMGData1(trainset)
+test_set = SkeletonAndEMGData1(testset)
+val_set = SkeletonAndEMGData1(valset)
 
 
-train_loader = DataLoader(train_set, batch_size=256,
-                          drop_last=False, num_workers=10,shuffle=True)
-valid_loader = DataLoader(val_set, batch_size=256,
-                          drop_last=False, num_workers=10)
-test_loader = DataLoader(test_set, batch_size=256,
-                         drop_last=False, num_workers=10)
+train_loader = DataLoader(train_set, batch_size=32,
+                          drop_last=False, num_workers=3,shuffle=True)
+valid_loader = DataLoader(val_set, batch_size=32,
+                          drop_last=False, num_workers=3)
+test_loader = DataLoader(test_set, batch_size=32,
+                         drop_last=False, num_workers=3)
+
 
 model = Demo(device).to(device).double()
 
