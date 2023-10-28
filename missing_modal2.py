@@ -32,7 +32,8 @@ run = wandb.init(
         "n_classes": 41,
         "batch_size": 128,
         "T": 1,
-        "device":'cuda:0'
+        "device":'cuda:0',
+        "cl_rate": 1
     })
 
 
@@ -95,59 +96,56 @@ class MultiModal(nn.Module):
 
         return [x1, x2, x5], [a1, a2, a5]  # video,emg,multimodal
 
+def super_gmc_loss(criterion,prediction, target, batch_representations, temperature, batch_size, cl_rate=2):
+    joint_mod_loss_sum = 0
+    for mod in range(len(batch_representations) - 1):
+        # Negative pairs: everything that is not in the current joint-modality pair
+        out_joint_mod = torch.cat(
+            [batch_representations[-1], batch_representations[mod]], dim=0
+        )
+        # [2*B, 2*B]
+        sim_matrix_joint_mod = torch.exp(
+            torch.mm(out_joint_mod, out_joint_mod.t().contiguous()) / temperature
+        )
+        # Mask for remove diagonal that give trivial similarity, [2*B, 2*B]
+        mask_joint_mod = (
+            torch.ones_like(sim_matrix_joint_mod)
+            - torch.eye(2 * batch_size, device=sim_matrix_joint_mod.device)
+        ).bool()
+        # Remove 2*B diagonals and reshape to [2*B, 2*B-1]
+        sim_matrix_joint_mod = sim_matrix_joint_mod.masked_select(
+            mask_joint_mod
+        ).view(2 * batch_size, -1)
 
-def super_gmc_loss(criterion,prediction, target, batch_representations, temperature, batch_size):
-        joint_mod_loss_sum = 0
-        for mod in range(len(batch_representations) - 1):
-            # Negative pairs: everything that is not in the current joint-modality pair
-            out_joint_mod = torch.cat(
-                [batch_representations[-1], batch_representations[mod]], dim=0
+        # Positive pairs: cosine loss joint-modality
+        pos_sim_joint_mod = torch.exp(
+            torch.sum(
+                batch_representations[-1] * batch_representations[mod], dim=-1
             )
-            # [2*B, 2*B]
-            sim_matrix_joint_mod = torch.exp(
-                torch.mm(out_joint_mod, out_joint_mod.t().contiguous()) / temperature
-            )
-            # Mask for remove diagonal that give trivial similarity, [2*B, 2*B]
-            mask_joint_mod = (
-                torch.ones_like(sim_matrix_joint_mod)
-                - torch.eye(2 * batch_size, device=sim_matrix_joint_mod.device)
-            ).bool()
-            # Remove 2*B diagonals and reshape to [2*B, 2*B-1]
-            sim_matrix_joint_mod = sim_matrix_joint_mod.masked_select(
-                mask_joint_mod
-            ).view(2 * batch_size, -1)
+            / temperature
+        )
+        # [2*B]
+        pos_sim_joint_mod = torch.cat([pos_sim_joint_mod, pos_sim_joint_mod], dim=0)
+        loss_joint_mod = -torch.log(
+            pos_sim_joint_mod / sim_matrix_joint_mod.sum(dim=-1)
+        )
+        joint_mod_loss_sum += loss_joint_mod
+        
+        # print(torch.mean(loss_joint_mod).item())
 
-            # Positive pairs: cosine loss joint-modality
-            pos_sim_joint_mod = torch.exp(
-                torch.sum(
-                    batch_representations[-1] * batch_representations[mod], dim=-1
-                )
-                / temperature
-            )
-            # [2*B]
-            pos_sim_joint_mod = torch.cat([pos_sim_joint_mod, pos_sim_joint_mod], dim=0)
-            loss_joint_mod = -torch.log(
-                pos_sim_joint_mod / sim_matrix_joint_mod.sum(dim=-1)
-            )
-            joint_mod_loss_sum += loss_joint_mod
-            
-            # print(torch.mean(loss_joint_mod).item())
+    supervised_loss = criterion(prediction[0], target) + criterion(prediction[1], target) + criterion(prediction[2], target)
+    joint_mod_loss_sum *= cl_rate
+    
+    L_GCM = torch.mean(joint_mod_loss_sum).item()
+    L_classify = torch.mean(supervised_loss).item()
+    # print(L_GCM)
+    # print(L_classify)
+    
 
-        supervised_loss = criterion(prediction[0], target) + criterion(prediction[1], target) + criterion(prediction[2], target)
-        joint_mod_loss_sum *= 0.1
-        
-        
-        
-        L_GCM = torch.mean(joint_mod_loss_sum).item()
-        L_classify = torch.mean(supervised_loss).item()
-        # print(L_GCM)
-        # print(L_classify)
-        
-
-        loss = torch.mean(joint_mod_loss_sum + supervised_loss)
-        # loss = torch.mean(supervised_loss)
-       
-        return loss,L_GCM,L_classify
+    loss = torch.mean(joint_mod_loss_sum + supervised_loss)
+    # loss = torch.mean(supervised_loss)
+    
+    return loss,L_GCM,L_classify
 
 def train(train_loader, model, criterion, optimizer, device, T, loss_log):
     running_loss = 0
@@ -161,13 +159,11 @@ def train(train_loader, model, criterion, optimizer, device, T, loss_log):
         labels = labels.to(device)
         emgs = emgs.to(device).double()
        
-
         # forward
         outputs, outputs2 = model(videos, emgs)
-       
             
         # backward
-        loss,L_GMC,classification_loss = super_gmc_loss(criterion,outputs2,labels,outputs,run.config['T'],run.config['batch_size'])
+        loss,L_GMC,classification_loss = super_gmc_loss(criterion,outputs2,labels,outputs,run.config['T'],run.config['batch_size'], run.config['cl_rate'])
     
         running_loss += loss.item()
         loss_gcm += L_GMC
@@ -242,11 +238,14 @@ def get_accuracy(model, data_loader, device, modality='multimodal'):
         predicted_labels.extend(predicted)
         truth_labels.extend(labels)
 
-    f1_weighted = f1_score(torch.tensor(truth_labels).cpu().data.numpy(
-    ), torch.tensor(predicted_labels).cpu().data.numpy(), average='weighted')
-    f1_micro = f1_score(torch.tensor(truth_labels).cpu().data.numpy(), torch.tensor(
-        predicted_labels).cpu().data.numpy(), average='weighted')
-    return correct/total, f1_weighted, f1_micro
+    f1_micro = f1_score(torch.tensor(truth_labels).cpu().data.numpy(
+    ), torch.tensor(predicted_labels).cpu().data.numpy(), average='micro')
+    precision_score_f1 = precision_score(torch.tensor(truth_labels).cpu().data.numpy(
+    ), torch.tensor(predicted_labels).cpu().data.numpy(), average='micro')
+    recall_score_f1 = recall_score(torch.tensor(truth_labels).cpu().data.numpy(
+    ), torch.tensor(predicted_labels).cpu().data.numpy(), average='micro')
+
+    return correct/total, f1_micro, precision_score_f1, recall_score_f1
 
 
 def seed_everything(seed):
@@ -261,22 +260,22 @@ def seed_everything(seed):
 
 seed_everything(run.config["random_seed"])
 
-trainset = MultiModalData("data/new_data/final_train_files.pkl")
-testset = MultiModalData("data/new_data/final_test_files.pkl")
-valset = MultiModalData("data/new_data/final_val_files.pkl")
+trainset = MultiModalData("data/new_data/new_train_files.pkl")
+testset = MultiModalData("data/new_data/new_test_files.pkl")
+valset = MultiModalData("data/new_data/new_val_files.pkl")
 
 train_loader = DataLoader(trainset, batch_size=run.config['batch_size'],
-                          drop_last=True, num_workers=10, shuffle=True)
+                          drop_last=True, num_workers=3, shuffle=True)
 valid_loader = DataLoader(valset, batch_size=run.config['batch_size'],
-                          drop_last=True, num_workers=10 )
+                          drop_last=True, num_workers=3 )
 test_loader = DataLoader(testset, batch_size=run.config['batch_size'],
-                         drop_last=True, num_workers=10)
+                         drop_last=True, num_workers=3)
 
 
 device = run.config['device']
 model = MultiModal(
     common_dim=run.config['common_dim'], n_classes=run.config['n_classes']).to(device)
-# model.load_state_dict(torch.load("log/Missing_modal/best_model9.pth"))
+# model.load_state_dict(torch.load("log/Missing_modal/best_model16.pth"))
 
 
 criterion = nn.CrossEntropyLoss()
@@ -290,27 +289,14 @@ valid_losses = []
 train_accuracy = []
 val_accuracy = []
 
-
-# train_log_video = [[],[],[]]
-# train_log_emg = [[],[],[]]
-# train_log_multimodal = [[],[],[]]
-
-
-# val_log_video = [[],[],[]]
-# val_log_emg = [[],[],[]]
-# val_log_multimodal = [[],[],[]]
-
-train_score_log = [[], [], [], [], [], [], [], [], []]
-val_score_log = [[], [], [], [], [], [], [], [], []]
-test_score_log = [[], [], [], [], [], [], [], [], []]
+train_score_log = [[], [], [], [], [], [], [], [], [],[],[],[]]
+val_score_log = [[], [], [], [], [], [], [], [], [],[],[],[]]
+test_score_log =[[], [], [], [], [], [], [], [], [],[],[],[]]
 
 
 loss_log = [[], [], []]
 val_loss_log = [[], [], []]
 
-# test_log_video = [[],[],[]]
-# test_log_emg = [[],[],[]]
-# test_log_multimodal = [[],[],[]]
 
 best_f1 = -1000
 
@@ -333,45 +319,51 @@ for epoch in range(epochs):
             valid_loader, model, criterion, device, T, val_loss_log)
     print(valid_loss)
 
-    train_acc, f1_score_weighted, f1_score_micro = get_accuracy(
+    train_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
         model, train_loader, device, modality="vid")
     train_score_log[0].append(train_acc)
-    train_score_log[1].append(f1_score_weighted)
-    train_score_log[2].append(f1_score_micro)
+    train_score_log[1].append(f1_score_micro)
+    train_score_log[2].append(precision_score_micro)
+    train_score_log[3].append(recall_score_micro)
 
-    train_acc, f1_score_weighted, f1_score_micro = get_accuracy(
+    train_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
         model, train_loader, device, modality="emg")
-    train_score_log[3].append(train_acc)
-    train_score_log[4].append(f1_score_weighted)
+    train_score_log[4].append(train_acc)
     train_score_log[5].append(f1_score_micro)
+    train_score_log[6].append(precision_score_micro)
+    train_score_log[7].append(recall_score_micro)
     print("train acc", train_acc)
 
-    train_acc, f1_score_weighted, f1_score_micro = get_accuracy(
+    train_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
         model, train_loader, device, modality="multimodal")
-    train_score_log[6].append(train_acc)
-    train_score_log[7].append(f1_score_weighted)
-    train_score_log[8].append(f1_score_micro)
+    train_score_log[8].append(train_acc)
+    train_score_log[9].append(f1_score_micro)
+    train_score_log[10].append(precision_score_micro)
+    train_score_log[11].append(recall_score_micro)
 
     print("train acc", train_acc)
 
-    val_acc, f1_score_weighted, f1_score_micro = get_accuracy(
+    val_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
         model, valid_loader, device, modality="vid")
     val_score_log[0].append(val_acc)
-    val_score_log[1].append(f1_score_weighted)
-    val_score_log[2].append(f1_score_micro)
+    val_score_log[1].append(f1_score_micro)
+    val_score_log[2].append(precision_score_micro)
+    val_score_log[3].append(recall_score_micro)
 
-    val_acc, f1_score_weighted, f1_score_micro = get_accuracy(
+    val_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
         model, valid_loader, device, modality="emg")
-    val_score_log[3].append(val_acc)
-    val_score_log[4].append(f1_score_weighted)
+    val_score_log[4].append(val_acc)
     val_score_log[5].append(f1_score_micro)
+    val_score_log[6].append(precision_score_micro)
+    val_score_log[7].append(recall_score_micro)
     print("Val acc", val_acc)
 
-    val_acc, f1_score_weighted, f1_score_micro = get_accuracy(
+    val_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
         model, valid_loader, device, modality="multimodal")
-    val_score_log[6].append(val_acc)
-    val_score_log[7].append(f1_score_weighted)
-    val_score_log[8].append(f1_score_micro)
+    val_score_log[8].append(val_acc)
+    val_score_log[9].append(f1_score_micro)
+    val_score_log[10].append(precision_score_micro)
+    val_score_log[11].append(recall_score_micro)
 
     print("Val acc", val_acc)
 
@@ -382,34 +374,37 @@ for epoch in range(epochs):
         best_f1 = f1_score_micro
 
      # get the bone accuracy
-    test_acc, tesst_f1_score_weighted, test_f1_score_micro = get_accuracy(
+    test_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
         model, test_loader, device, modality="vid")
     test_score_log[0].append(test_acc)
-    test_score_log[1].append(tesst_f1_score_weighted)
-    test_score_log[2].append(test_f1_score_micro)
+    test_score_log[1].append(f1_score_micro)
+    test_score_log[2].append(precision_score_micro)
+    test_score_log[3].append(recall_score_micro)
     print("test acc", test_acc)
     
 
     # get the emg accuracy
-    test_acc, tesst_f1_score_weighted, test_f1_score_micro = get_accuracy(
+    test_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
         model, test_loader, device, modality="emg")
-    test_score_log[3].append(test_acc)
-    test_score_log[4].append(tesst_f1_score_weighted)
-    test_score_log[5].append(test_f1_score_micro)
+    test_score_log[4].append(test_acc)
+    test_score_log[5].append(f1_score_micro)
+    test_score_log[6].append(precision_score_micro)
+    test_score_log[7].append(recall_score_micro)
     print("test acc", test_acc)
     
 
     # get the multimodal accuracy
-    test_acc, tesst_f1_score_weighted, test_f1_score_micro = get_accuracy(
+    test_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
         model, test_loader, device, modality="multimodal")
-    test_score_log[6].append(test_acc)
-    test_score_log[7].append(tesst_f1_score_weighted)
-    test_score_log[8].append(test_f1_score_micro)
+    test_score_log[8].append(test_acc)
+    test_score_log[9].append(f1_score_micro)
+    test_score_log[10].append(precision_score_micro)
+    test_score_log[11].append(recall_score_micro)
     print("test acc", test_acc)
-    wandb.login(
-    key='9bce1a84793dd8652665e9c5a731d2f7775245ad',
-    relogin=True
-)
+    # wandb.login(
+    #     key='9bce1a84793dd8652665e9c5a731d2f7775245ad',
+    #     relogin=True
+    # )
     wandb.log({
         "Train loss": wandb.plot.line_series(
             xs=range(len(loss_log[0])),
@@ -427,57 +422,57 @@ for epoch in range(epochs):
         ),
         "Train Accuracy Video": wandb.plot.line_series(
             xs=range(len(train_score_log[0])),
-            ys=[train_score_log[0], train_score_log[1], train_score_log[2]],
-            keys=["Accuracy", "F1_score_weighted", "F1_score_micro"],
+            ys=[train_score_log[0], train_score_log[1], train_score_log[2],train_score_log[3]],
+            keys=["Accuracy", "f1_score_micro", "precision_score_micro","recall_score_micro"],
             title="Train Accuracy Video",
             xname="x epochs"),
         "Train Accuracy EMG": wandb.plot.line_series(
             xs=range(len(train_score_log[0])),
-            ys=[train_score_log[3], train_score_log[4], train_score_log[5]],
-            keys=["Accuracy", "F1_score_weighted", "F1_score_micro"],
+            ys=[train_score_log[4], train_score_log[5], train_score_log[6],train_score_log[7]],
+            keys=["Accuracy", "f1_score_micro", "precision_score_micro","recall_score_micro"],
             title="Train Accuracy EMG",
             xname="x epochs"),
         "Train Accuracy Multimodal": wandb.plot.line_series(
             xs=range(len(train_score_log[0])),
-            ys=[train_score_log[6], train_score_log[7], train_score_log[8]],
-            keys=["Accuracy", "F1_score_weighted", "F1_score_micro"],
+            ys=[train_score_log[8], train_score_log[9], train_score_log[10],train_score_log[11]],
+            keys=["Accuracy", "f1_score_micro", "precision_score_micro","recall_score_micro"],
             title="Train Accuracy Multimodal",
             xname="x epochs"),
 
         "Val Accuracy Video": wandb.plot.line_series(
             xs=range(len(val_score_log[0])),
-            ys=[val_score_log[0], val_score_log[1], val_score_log[2]],
-            keys=["Accuracy", "F1_score_weighted", "F1_score_micro"],
+            ys=[val_score_log[0], val_score_log[1], val_score_log[2],val_score_log[3]],
+            keys=["Accuracy", "f1_score_micro", "precision_score_micro","recall_score_micro"],
             title="Val Accuracy Video",
             xname="x epochs"),
         "Val Accuracy EMG": wandb.plot.line_series(
             xs=range(len(val_score_log[0])),
-            ys=[val_score_log[3], val_score_log[4], val_score_log[5]],
-            keys=["Accuracy", "F1_score_weighted", "F1_score_micro"],
+            ys=[val_score_log[4], val_score_log[5], val_score_log[6],val_score_log[7]],
+            keys=["Accuracy", "f1_score_micro", "precision_score_micro","recall_score_micro"],
             title="Val Accuracy EMG",
             xname="x epochs"),
         "Val Accuracy Multimodal": wandb.plot.line_series(
             xs=range(len(val_loss_log[0])),
-            ys=[val_score_log[6], val_score_log[7], val_score_log[8]],
-            keys=["Accuracy", "F1_score_weighted", "F1_score_micro"],
+            ys=[val_score_log[8], val_score_log[9], val_score_log[10],val_score_log[11]],
+            keys=["Accuracy", "f1_score_micro", "precision_score_micro","recall_score_micro"],
             title="Val Accuracy Multimodal",
             xname="x epochs"),
         "Test Accuracy Video": wandb.plot.line_series(
             xs=range(len(test_score_log[0])),
-            ys=[test_score_log[0], test_score_log[1], test_score_log[2]],
-            keys=["Accuracy", "F1_score_weighted", "F1_score_micro"],
+            ys=[test_score_log[0], test_score_log[1], test_score_log[2],test_score_log[3]],
+            keys=["Accuracy", "f1_score_micro", "precision_score_micro","recall_score_micro"],
             title="Test Accuracy Video",
             xname="x epochs"),
         "Test Accuracy EMG": wandb.plot.line_series(
             xs=range(len(test_score_log[0])),
-            ys=[test_score_log[3], test_score_log[4], test_score_log[5]],
-            keys=["Accuracy", "F1_score_weighted", "F1_score_micro"],
+            ys=[test_score_log[4], test_score_log[5], test_score_log[6],test_score_log[7]],
+            keys=["Accuracy", "f1_score_micro", "precision_score_micro","recall_score_micro"],
             title="Test Accuracy EMG",
             xname="x epochs"),
         "Test Accuracy Multimodal": wandb.plot.line_series(
             xs=range(len(test_score_log[0])),
-            ys=[test_score_log[6], test_score_log[7], test_score_log[8]],
-            keys=["Accuracy", "F1_score_weighted", "F1_score_micro"],
+            ys=[test_score_log[8], test_score_log[9], test_score_log[10],test_score_log[11]],
+            keys=["Accuracy", "f1_score_micro", "precision_score_micro","recall_score_micro"],
             title="Test Accuracy Multimodal",
             xname="x epochs"),
 

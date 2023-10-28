@@ -24,14 +24,33 @@ import glob
 from tqdm.auto import tqdm
 from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
-from loader.dataloader import SkeletonAndEMGData1
+from loader.dataloader import SkeletonAndEMGData
 from sklearn.metrics import precision_score, recall_score, f1_score
 from util.log import Log
 from trainer import train, validate, get_accuracy
+import wandb
 
+wandb.login(
+    key='0c9e631211d579a62fa94880e8e3efcf09cd66a0',
+)
+
+run = wandb.init(
+    # Set the project where this run will be logged
+    project="Multimodal-HAR",
+    entity='aiotlab',
+    group='IncepSE_for_EMG',
+    name=f'IncepSE_for_EMG_lrate:{1e-3}_epoch:{60}',
+    # Track hyperparameters and run metadata
+    config={
+        "epochs": 60,
+        'random_seed': 20,
+        "n_classes": 41,
+        "batch_size": 32,
+        "device": 'cuda:1'
+    })
 
 # helpers
-device = "cuda:1"
+device = run.config['device']
 
 
 class SE(nn.Module):
@@ -156,112 +175,130 @@ class IncepSE(nn.Module):
        
         return self.classify(x)
 
-
-def seed_everything(seed):
-    random.seed(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = True
-
-
-seed_everything(20)
-
-data = []
-data.extend(glob.glob('data/new_data/emg_data/*'))
+def trainer():
+    # helpers
+    device = run.config['device']
+    def seed_everything(seed):
+        random.seed(seed)
+        os.environ['PYTHONHASHSEED'] = str(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed(seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = True
 
 
-index = np.random.permutation(len(data))
-data = np.array(data)[index]
-train_size = 12000
-test_size = 4500
-val_size = data.shape[0]-train_size - test_size
-trainset = data[:train_size]
-testset = data[train_size:train_size+test_size]
-valset = data[train_size+test_size:]
+    seed_everything(20)
 
-train_set = SkeletonAndEMGData1(trainset)
-test_set = SkeletonAndEMGData1(testset)
-val_set = SkeletonAndEMGData1(valset)
+    trainset = SkeletonAndEMGData(torch.load("data/new_data/emg_train.pkl"))
+    testset = SkeletonAndEMGData(torch.load("data/new_data/emg_test.pkl"))
+    valset = SkeletonAndEMGData(torch.load("data/new_data/emg_val.pkl"))
 
+    train_loader = DataLoader(trainset, batch_size=32,
+                            drop_last=True, num_workers=3, shuffle=True)
+    valid_loader = DataLoader(valset, batch_size=32,
+                            drop_last=True, num_workers=3)
+    test_loader = DataLoader(testset, batch_size=32,
+                            drop_last=True, num_workers=3)
 
-train_loader = DataLoader(train_set, batch_size=32,
-                          drop_last=True, num_workers=3, shuffle=True)
-valid_loader = DataLoader(val_set, batch_size=32,
-                          drop_last=True, num_workers=3)
-test_loader = DataLoader(test_set, batch_size=32,
-                         drop_last=True, num_workers=3)
+    # model = model = IncepSE(num_class=41,ic = 8,depth = 5,bottle_neck=32,oc_filter=32,dropout=0).to(device).double()
+    model = IncepSE(num_class=41, ic=8, depth=3, bottle_neck=30,
+                    oc_filter=30, dropout=0.3).to(device).double()
 
-# model = model = IncepSE(num_class=41,ic = 8,depth = 5,bottle_neck=32,oc_filter=32,dropout=0).to(device).double()
-model = IncepSE(num_class=41, ic=8, depth=3, bottle_neck=30,
-                oc_filter=30, dropout=0.3).to(device).double()
-
-log = Log("log/InceptionNet", "vit_emg")
-
-
-criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters())
-stepLR = torch.optim.lr_scheduler.StepLR(optimizer,step_size=10,gamma = 0.8)
-print(3,32,32,0,"step",20,"gamma",0.8)
-epochs = 500
-train_losses = []
-valid_losses = []
-train_accuracy = []
-val_accuracy = []
-
-train_f1score_weighted = []
-val_f1scroe_weighted = []
-
-train_f1score_micro = []
-val_f1scroe_micro = []
-
-test_log = []
-
-best_f1 = -1000
-
-for epoch in range(epochs):
-    # training
-    model, train_loss, optimizer = train(
-        train_loader, model, criterion, optimizer, device)
-    stepLR.step()
-
-    # validation
-    with torch.no_grad():
-        model, valid_loss = validate(valid_loader, model, criterion, device)
-    stepLR.step(valid_loss)
-    train_acc, f1_score_weighted, f1_score_micro = get_accuracy(
-        model, train_loader, device)
    
-    # save f1 score
-    train_f1score_weighted.append(f1_score_weighted)
-    train_f1score_micro.append(f1_score_micro)
 
-    val_acc, f1_score_weighted, f1_score_micro = get_accuracy(
-        model, valid_loader, device)
-    # save f1 score
-    if best_f1 < f1_score_micro:
-        torch.save(model.state_dict(),
-                   f"log/InceptionNet/best_model{epoch}.pth")
-        log.save_model(model)
-        best_f1 = f1_score_micro
-    val_f1scroe_weighted.append(f1_score_weighted)
-    val_f1scroe_micro.append(f1_score_micro)
-    print("Epoch {} --- Train loss = {} --- Valid loss = {} -- Train set accuracy = {} % Valid set Accuracy = {} %".format
-          (epoch+1, train_loss, valid_loss, train_acc, val_acc))
-    # save loss value
-    train_losses.append(train_loss)
-    valid_losses.append(valid_loss)
+    log = Log("log/InceptionNet", "vit_emg")
 
-    # save accuracy
-    train_accuracy.append(train_acc)
-    val_accuracy.append(val_acc)
+    criterion = nn.CrossEntropyLoss()
+    optimizer = torch.optim.Adam(model.parameters())
+    stepLR = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer,patience=5,factor = 0.8, threshold=1e-5)
+    epochs = run.config['epochs']
+    train_losses = []
+    valid_losses = []
+    train_accuracy = []
+    val_accuracy = []
 
-    test_log.append(get_accuracy(model, test_loader, device))
+    train_score_log = [[], [], [], []]
+    val_score_log = [[], [], [], [], []]
+    test_score_log = [[], [], [], [], []]
+    device = run.config['device']
+    best_f1 = -1000
 
-    log.save_training_log(train_losses, train_accuracy,
-                          train_f1score_weighted, train_f1score_micro)
-    log.save_val_log(valid_losses, val_accuracy,
-                     val_f1scroe_weighted, val_f1scroe_micro)
-    log.save_test_log(test_log)
+    for epoch in range(epochs):
+        # training
+
+        model, train_loss, optimizer = train(
+                train_loader, model, criterion, optimizer, device)
+        train_losses.append(train_loss)
+
+        # validation
+        with torch.no_grad():
+            model, valid_loss = validate(
+                valid_loader, model, criterion, device)
+        valid_losses.append(valid_loss)
+        stepLR.step(valid_loss)
+        # get train score
+        train_acc, f1_score_micro,precision_score_micro,recall_score_micro = get_accuracy(model, train_loader, device)
+        train_score_log[0].append(train_acc)
+        train_score_log[1].append(f1_score_micro)
+        train_score_log[2].append(precision_score_micro)
+        train_score_log[3].append(recall_score_micro)
+
+        # get val score
+        val_acc, f1_score_micro,precision_score_micro,recall_score_micro = get_accuracy(model, valid_loader, device)
+        val_score_log[0].append(val_acc)
+        val_score_log[1].append(f1_score_micro)
+        val_score_log[2].append(precision_score_micro)
+        val_score_log[3].append(recall_score_micro)
+
+        # save f1 score
+        if best_f1 < f1_score_micro:
+            torch.save(model.state_dict(),
+                    f"log/InceptionNet/best_model{epoch}.pth")
+            best_f1 = f1_score_micro
+
+        # get test score
+        test_acc, f1_score_micro,precision_score_micro,recall_score_micro = get_accuracy(model, test_loader, device)
+        test_score_log[0].append(test_acc)
+        test_score_log[1].append(f1_score_micro)
+        test_score_log[2].append(precision_score_micro)
+        test_score_log[3].append(recall_score_micro)
+
+        wandb.log({
+            "Train loss": wandb.plot.line_series(
+                xs=range(len(train_losses)),
+                ys=[train_losses],
+                keys= ["Loss"],
+                title="Train loss",
+                xname="x epochs"
+            ),
+            "Val loss": wandb.plot.line_series(
+                xs=range(len(valid_losses)),
+                ys=[valid_losses],
+                keys=["Loss"],
+                title="Val loss",
+                xname="x epochs"
+            ),
+            "Train Score": wandb.plot.line_series(
+                xs=range(len(train_score_log[0])),
+                ys=[train_score_log[0], train_score_log[1], train_score_log[2],train_score_log[3]],
+                keys=["Accuracy", "F1_score_micro","precision_score_micro","recall_score_micro"],
+                title="Train Score",
+                xname="x epochs"),
+            "Val Score": wandb.plot.line_series(
+                xs=range(len(val_score_log[0])),
+                ys=[val_score_log[0], val_score_log[1], val_score_log[2],val_score_log[3]],
+                keys=["Accuracy", "F1_score_micro","precision_score_micro","recall_score_micro"],
+                title="Val Score",
+                xname="x epochs"),
+            "Test Score": wandb.plot.line_series(
+                xs=range(len(test_score_log[0])),
+                ys=[test_score_log[0], test_score_log[1], test_score_log[2],test_score_log[3]],
+                keys=["Accuracy", "F1_score_micro","precision_score_micro","recall_score_micro"],
+                title="Test Score",
+                xname="x epochs"),
+
+        })
+    wandb.run.finish()
+
+trainer()

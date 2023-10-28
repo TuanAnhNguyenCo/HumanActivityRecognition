@@ -48,53 +48,31 @@ class SkeletonData(Dataset):
 class MultiModalData(Dataset):
     def __init__(self, url):
         self.data = torch.load(url)
-       
         print(len(self.data))
-       
+
     def __len__(self):
         return len(self.data)
- 
+
     def __getitem__(self, idx):
         # try:
-            bones = torch.tensor(torch.load(self.data[idx][0]))
-            emg, label = torch.load(self.data[idx][1])
-            return (bones, torch.tensor(label), torch.tensor(emg))
+        bones = torch.tensor(torch.load(self.data[idx][0]))
+        emg, label = torch.load(self.data[idx][1])
+        return (bones, torch.tensor(label), torch.tensor(emg))
 
 
-class MultiModalData1(Dataset):
-    def __init__(self, url):
-        self.data = url
-        # self.data = self.data[:1000]
-        print(len(self.data))
+# class MultiModalData1(Dataset):
+#     def __init__(self, url):
+#         self.data = url
+#         # self.data = self.data[:1000]
+#         print(len(self.data))
 
-    def __len__(self):
-        return len(self.data)
+#     def __len__(self):
+#         return len(self.data)
 
-    def __getitem__(self, idx):
+#     def __getitem__(self, idx):
 
-        scalogram, label = torch.load(self.data[idx])
-        return (0, torch.tensor(label), scalogram)
-
-
-class SkeletonAndEMGData(Dataset):
-    def __init__(self, data):
-        self.data = data
-        print(len(self.data))
-
-    def __len__(self):
-        return len(self.data)
-
-    def __getitem__(self, idx):
-        # original emg, normalized emg, label
-        emg, _, label = torch.load(self.data[idx])
-        while emg.shape[-1] < 8:
-            emg, _, label = torch.load(
-                self.data[random.randint(0, self.__len__()-1)])
-        # return _, label, emg
-        emg = rearrange(emg, "a b  -> b a")  # 8*n
-        emg = torch.abs(emg)
-
-        return _, label, emg
+#         scalogram, label = torch.load(self.data[idx])
+#         return (0, torch.tensor(label), scalogram)
 
 
 # (tensor([[0.1758],
@@ -113,7 +91,7 @@ class SkeletonAndEMGData(Dataset):
 #          [-0.2794],
 #          [-0.2791],
 #          [-0.2786]], dtype=torch.float64))
-class SkeletonAndEMGData1(Dataset):
+class SkeletonAndEMGData(Dataset):
     def __init__(self, data):
         self.data = data
         print(len(self.data))
@@ -124,21 +102,16 @@ class SkeletonAndEMGData1(Dataset):
     def __getitem__(self, idx):
         # original emg, normalized emg, label
         emg, label = torch.load(self.data[idx])
-        while emg.shape[-1] < 8:
-            emg,label = torch.load(
-                self.data[random.randint(0, self.__len__()-1)])
+
         # return _, label, emg
         emg = torch.tensor(rearrange(emg, "a b  -> b a"))  # 8*n
         # ma = torch.tensor([[0.1758],[0.0866],[0.1913],[0.1871],[0.1908],[0.1897],[0.1893],[0.1857]]).reshape(8,1)
         # mi = torch.tensor([[-0.1183],[-0.0776],[-0.2787],[-0.2766],[-0.2817],[-0.2794],[-0.2791],[-0.2786]]).reshape(8,1)
         # emg = 2*(emg - mi)/(ma-mi) - 1
         # emg = abs(emg)
-   
-        
-        
 
+        return 1, label, emg
 
-        return 1,label, emg
 
 def load_data(ROOT, train_size, valid_size, test_size, input_dim, n=5):
     folder_name = os.listdir(ROOT)
