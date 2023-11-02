@@ -73,8 +73,6 @@ class ThreeModalData(Dataset):
         bones = torch.tensor(torch.load(self.data[idx][0]))
         emg, label = torch.load(self.data[idx][1])
         spectrogram, label = torch.load(self.data[idx][1].replace("emg_data","new_spectrogram"))
-        if spectrogram.shape[1] > 130:
-            spectrogram = spectrogram[:,:130,:]
         return (bones, torch.tensor(label), torch.tensor(emg),torch.tensor(spectrogram))
 
 
