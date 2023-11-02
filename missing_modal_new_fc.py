@@ -31,9 +31,11 @@ run = wandb.init(
         "common_dim": 64,
         "n_classes": 41,
         "batch_size": 128,
-        "T": 1,
-        "device":'cuda:0',
-        "cl_rate": 1
+        "T": 10,
+        "device":'cuda:1',
+        "cl_rate": 1,
+        "param_vid": 1,
+        "param_emg": 1
     })
 
 
@@ -56,19 +58,24 @@ class MultiModal(nn.Module):
         self.fc1 = nn.Linear(1536, common_dim).double()
         self.fc2 = nn.Linear(128, common_dim).double()
         self.fc3 = nn.Linear(2176, common_dim).double()
-        self.fc4 = nn.Linear(common_dim, common_dim).double()
+        self.fc4 = nn.Sequential(
+            nn.ReLU(),
+            nn.Linear(common_dim, common_dim).double()
+        )
         
         self.classify = nn.Sequential(
             nn.ReLU(),
             nn.Linear(common_dim,common_dim),
             nn.ReLU(),
+            nn.Dropout(p = 0.1),
+            nn.Linear(common_dim,common_dim),
+            nn.ReLU(),
             nn.Dropout(p = 0.1)
         ).double()
-        self.drop = nn.Dropout(0.0)
+        self.drop = nn.Dropout(0.3)
          
     def forward(self, bones, emg):
         x1 = self.gcn(bones)  # out
-        x1 = self.drop(x1)
         x2 = self.vit(emg.double())  # out
         emg1 = rearrange(emg, "b (a d) c ->b a (d c) ", a=5).double()
         bone1 = rearrange(bones, "b t n c -> b t (n c)").double()
@@ -81,9 +88,6 @@ class MultiModal(nn.Module):
         x1 = self.fc1(x1.double())
         x2 = self.fc2(x2)
         x5 = self.fc3(x5)
-
-        x1 = self.fc4(x1)
-        x2 = self.fc4(x2)
         x5 = self.fc4(x5)
         
         # classify
@@ -97,8 +101,10 @@ class MultiModal(nn.Module):
 
         return [x1, x2, x5], [a1, a2, a5]  # video,emg,multimodal
 
-def super_gmc_loss(criterion,prediction, target, batch_representations, temperature, batch_size, cl_rate=2):
+def super_gmc_loss(criterion,prediction, target, batch_representations, temperature, batch_size,epoch=1, cl_rate=2, params=[1,0.8]):
     joint_mod_loss_sum = 0
+    losses = []
+    
     for mod in range(len(batch_representations) - 1):
         # Negative pairs: everything that is not in the current joint-modality pair
         out_joint_mod = torch.cat(
@@ -130,15 +136,20 @@ def super_gmc_loss(criterion,prediction, target, batch_representations, temperat
         loss_joint_mod = -torch.log(
             pos_sim_joint_mod / sim_matrix_joint_mod.sum(dim=-1)
         )
-        joint_mod_loss_sum += loss_joint_mod
+        losses.append(loss_joint_mod * params[mod])
         
         # print(torch.mean(loss_joint_mod).item())
-
-    supervised_loss = criterion(prediction[0], target) + criterion(prediction[1], target) + criterion(prediction[2], target)
+    joint_mod_loss_sum = sum(losses) 
+    
+    supervised_loss =  criterion(prediction[0], target)/epoch +criterion(prediction[1], target)/epoch + 3*criterion(prediction[2], target)
+    # supervised_loss =  criterion(prediction[2], target)
+    
     joint_mod_loss_sum *= cl_rate
     
     L_GCM = torch.mean(joint_mod_loss_sum).item()
     L_classify = torch.mean(supervised_loss).item()
+    L_GCM_vid = torch.mean(losses[0]).item()
+    L_GCM_emg = torch.mean(losses[1]).item()
     # print(L_GCM)
     # print(L_classify)
     
@@ -146,12 +157,14 @@ def super_gmc_loss(criterion,prediction, target, batch_representations, temperat
     loss = torch.mean(joint_mod_loss_sum + supervised_loss)
     # loss = torch.mean(supervised_loss)
     
-    return loss,L_GCM,L_classify
+    return loss,L_GCM,L_classify, L_GCM_vid, L_GCM_emg
 
-def train(train_loader, model, criterion, optimizer, device, T, loss_log):
+def train(train_loader, model, criterion, optimizer, device, T, loss_log,epoch):
     running_loss = 0
     loss_gcm = 0
     loss_classify = 0
+    loss_gcm_vid = 0
+    loss_gcm_emg = 0
     model.train()
 
     for videos, labels, emgs in tqdm(train_loader):
@@ -164,10 +177,12 @@ def train(train_loader, model, criterion, optimizer, device, T, loss_log):
         outputs, outputs2 = model(videos, emgs)
             
         # backward
-        loss,L_GMC,classification_loss = super_gmc_loss(criterion,outputs2,labels,outputs,run.config['T'],run.config['batch_size'], run.config['cl_rate'])
+        loss,L_GMC,classification_loss, L_GMC_vid, L_GMC_emg = super_gmc_loss(criterion,outputs2,labels,outputs,run.config['T'],run.config['batch_size'],epoch, run.config['cl_rate'], params=[run.config['param_vid'], run.config['param_emg']])
     
         running_loss += loss.item()
         loss_gcm += L_GMC
+        loss_gcm_vid += L_GMC_vid
+        loss_gcm_emg += L_GMC_emg
         loss_classify += classification_loss
         optimizer.zero_grad()
         loss.backward()
@@ -175,19 +190,24 @@ def train(train_loader, model, criterion, optimizer, device, T, loss_log):
 
     epoch_loss = running_loss / (len(train_loader))
     loss_gcm = loss_gcm / (len(train_loader))
+    loss_gcm_vid = loss_gcm_vid / (len(train_loader))
+    loss_gcm_emg = loss_gcm_emg / (len(train_loader))
     loss_classify = loss_classify / (len(train_loader))
     loss_log[0].append(loss_gcm)
     loss_log[1].append(loss_classify)
-    loss_log[2].append(epoch_loss)
+    loss_log[2].append(loss_gcm_vid)
+    loss_log[3].append(loss_gcm_emg)
+    loss_log[4].append(epoch_loss)
 
     return model, epoch_loss, optimizer, loss_log
-
 
 def validate(valid_loader, model, criterion, device, T, val_loss_log):
     model.eval()
     running_loss = 0
     loss_gcm = 0
     loss_classify = 0
+    loss_gcm_vid = 0
+    loss_gcm_emg = 0
 
     for videos, labels, emgs in tqdm(valid_loader):
 
@@ -198,18 +218,25 @@ def validate(valid_loader, model, criterion, device, T, val_loss_log):
         # forward
         outputs, outputs2 = model(videos, emgs)
 
-        loss,L_GMC,classification_loss = super_gmc_loss(criterion,outputs2,labels,outputs,run.config['T'],run.config['batch_size'])
+        loss,L_GMC,classification_loss, L_GMC_vid, L_GMC_emg = super_gmc_loss(criterion,outputs2,labels,outputs,run.config['T'],run.config['batch_size'], run.config['cl_rate'], params=[run.config['param_vid'], run.config['param_emg']])
+    
     
         running_loss += loss.item()
         loss_gcm += L_GMC
+        loss_gcm_vid += L_GMC_vid
+        loss_gcm_emg += L_GMC_emg
         loss_classify += classification_loss
 
-    epoch_loss = running_loss / (len(valid_loader))
-    loss_gcm = loss_gcm / (len(valid_loader))
-    loss_classify = loss_classify / (len(valid_loader))
+    epoch_loss = running_loss / (len(train_loader))
+    loss_gcm = loss_gcm / (len(train_loader))
+    loss_gcm_vid = loss_gcm_vid / (len(train_loader))
+    loss_gcm_emg = loss_gcm_emg / (len(train_loader))
+    loss_classify = loss_classify / (len(train_loader))
     val_loss_log[0].append(loss_gcm)
     val_loss_log[1].append(loss_classify)
-    val_loss_log[2].append(epoch_loss)
+    val_loss_log[2].append(loss_gcm_vid)
+    val_loss_log[3].append(loss_gcm_emg)
+    val_loss_log[4].append(epoch_loss)
     return model, epoch_loss, val_loss_log
 
 
@@ -240,11 +267,11 @@ def get_accuracy(model, data_loader, device, modality='multimodal'):
         truth_labels.extend(labels)
 
     f1_micro = f1_score(torch.tensor(truth_labels).cpu().data.numpy(
-    ), torch.tensor(predicted_labels).cpu().data.numpy(), average='micro')
+    ), torch.tensor(predicted_labels).cpu().data.numpy(), average='macro')
     precision_score_f1 = precision_score(torch.tensor(truth_labels).cpu().data.numpy(
-    ), torch.tensor(predicted_labels).cpu().data.numpy(), average='micro')
+    ), torch.tensor(predicted_labels).cpu().data.numpy(), average='macro')
     recall_score_f1 = recall_score(torch.tensor(truth_labels).cpu().data.numpy(
-    ), torch.tensor(predicted_labels).cpu().data.numpy(), average='micro')
+    ), torch.tensor(predicted_labels).cpu().data.numpy(), average='macro')
 
     return correct/total, f1_micro, precision_score_f1, recall_score_f1
 
@@ -266,11 +293,11 @@ testset = MultiModalData("data/new_data/new_test_files.pkl")
 valset = MultiModalData("data/new_data/new_val_files.pkl")
 
 train_loader = DataLoader(trainset, batch_size=run.config['batch_size'],
-                          drop_last=True, num_workers=3, shuffle=True)
+                          drop_last=True, num_workers=2, shuffle=True)
 valid_loader = DataLoader(valset, batch_size=run.config['batch_size'],
-                          drop_last=True, num_workers=3 )
+                          drop_last=True, num_workers=2 )
 test_loader = DataLoader(testset, batch_size=run.config['batch_size'],
-                         drop_last=True, num_workers=3)
+                         drop_last=True, num_workers=2)
 
 
 device = run.config['device']
@@ -295,8 +322,8 @@ val_score_log = [[], [], [], [], [], [], [], [], [],[],[],[]]
 test_score_log =[[], [], [], [], [], [], [], [], [],[],[],[]]
 
 
-loss_log = [[], [], []]
-val_loss_log = [[], [], []]
+loss_log = [[], [], [], [], []]
+val_loss_log =  [[], [], [], [], []]
 
 
 best_f1 = -1000
@@ -311,38 +338,39 @@ for epoch in range(epochs):
     # training
     with torch.autograd.detect_anomaly():
         model, train_loss, optimizer, loss_log = train(
-            train_loader, model, criterion, optimizer, device, T, loss_log)
+            train_loader, model, criterion, optimizer, device, T, loss_log,epoch+1)
     print("train_loss", train_loss)
 
-    # validation
-    with torch.no_grad():
-        model, valid_loss, val_loss_log = validate(
-            valid_loader, model, criterion, device, T, val_loss_log)
-    print(valid_loss)
+    with torch.autograd.detect_anomaly():
+        # validation
+        with torch.no_grad():
+            model, valid_loss, val_loss_log = validate(
+                valid_loader, model, criterion, device, T, val_loss_log)
+        print(valid_loss)
 
-    train_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
-        model, train_loader, device, modality="vid")
-    train_score_log[0].append(train_acc)
-    train_score_log[1].append(f1_score_micro)
-    train_score_log[2].append(precision_score_micro)
-    train_score_log[3].append(recall_score_micro)
+    # train_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
+    #     model, train_loader, device, modality="vid")
+    # train_score_log[0].append(train_acc)
+    # train_score_log[1].append(f1_score_micro)
+    # train_score_log[2].append(precision_score_micro)
+    # train_score_log[3].append(recall_score_micro)
 
-    train_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
-        model, train_loader, device, modality="emg")
-    train_score_log[4].append(train_acc)
-    train_score_log[5].append(f1_score_micro)
-    train_score_log[6].append(precision_score_micro)
-    train_score_log[7].append(recall_score_micro)
-    print("train acc", train_acc)
+    # train_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
+    #     model, train_loader, device, modality="emg")
+    # train_score_log[4].append(train_acc)
+    # train_score_log[5].append(f1_score_micro)
+    # train_score_log[6].append(precision_score_micro)
+    # train_score_log[7].append(recall_score_micro)
+    # print("train acc", train_acc)
 
-    train_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
-        model, train_loader, device, modality="multimodal")
-    train_score_log[8].append(train_acc)
-    train_score_log[9].append(f1_score_micro)
-    train_score_log[10].append(precision_score_micro)
-    train_score_log[11].append(recall_score_micro)
+    # train_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
+    #     model, train_loader, device, modality="multimodal")
+    # train_score_log[8].append(train_acc)
+    # train_score_log[9].append(f1_score_micro)
+    # train_score_log[10].append(precision_score_micro)
+    # train_score_log[11].append(recall_score_micro)
 
-    print("train acc", train_acc)
+    # print("train acc", train_acc)
 
     val_acc, f1_score_micro, precision_score_micro, recall_score_micro = get_accuracy(
         model, valid_loader, device, modality="vid")
@@ -410,14 +438,14 @@ for epoch in range(epochs):
         "Train loss": wandb.plot.line_series(
             xs=range(len(loss_log[0])),
             ys=loss_log,
-            keys=["L_GCM", "L_classify", "Loss"],
+            keys=["L_GCM", "L_classify","loss_gcm_vid","loss_gcm_emg", "Loss"],
             title="Train loss",
             xname="x epochs"
         ),
         "Val loss": wandb.plot.line_series(
             xs=range(len(val_loss_log[0])),
             ys=val_loss_log,
-            keys=["L_GCM", "L_classify", "Loss"],
+            keys=["L_GCM", "L_classify","loss_gcm_vid","loss_gcm_emg", "Loss"],
             title="Val loss",
             xname="x epochs"
         ),

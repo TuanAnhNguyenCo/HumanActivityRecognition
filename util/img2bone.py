@@ -34,7 +34,8 @@ class HandDetector:
         # img = cv2.imread(img_url)
         img_bone = np.ones((img.shape[0], img.shape[1], 3)) * 255
 
-        img_RGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        # img_RGB = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img_RGB = img
         self.results = self.hands.process(img_RGB)
         all_hands = []
         h, w, c = img.shape
