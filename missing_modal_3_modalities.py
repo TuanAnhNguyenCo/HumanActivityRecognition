@@ -38,7 +38,6 @@ run = wandb.init(
         "param_vid": 1,
         "param_emg": 1,
         "param_spec": 1,
-        
     })
 
 class CrossAttentionFor2Modalites(nn.Module):
@@ -542,7 +541,7 @@ for epoch in range(epochs):
             xs=range(len(val_loss_log[0])),
             ys=[val_score_log[8], val_score_log[9], val_score_log[10],val_score_log[11]],
             keys=["Accuracy", "f1_score_macro", "precision_score_macro","recall_score_macro"],
-            title="Val Accuracy Multimodal",
+            title="Val Accuracy Spectrogram",
             xname="x epochs"),
          "Val Accuracy Multimodal": wandb.plot.line_series(
             xs=range(len(val_loss_log[0])),
@@ -568,7 +567,7 @@ for epoch in range(epochs):
             xs=range(len(test_score_log[0])),
             ys=[test_score_log[8], test_score_log[9], test_score_log[10],test_score_log[11]],
             keys=["Accuracy", "f1_score_macro", "precision_score_macro","recall_score_macro"],
-            title="Test Accuracy Multimodal",
+            title="Test Accuracy Spectrogram",
             xname="x epochs"),
          "Test Accuracy Multimodal": wandb.plot.line_series(
             xs=range(len(test_score_log[0])),
